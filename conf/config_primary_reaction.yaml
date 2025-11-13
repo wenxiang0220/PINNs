@@ -1,0 +1,35 @@
+# conf/config_primary_reaction.yaml — TrainingConf-compatible (no grad_clip_norm)
+defaults:
+  - physicsnemo_default
+  - scheduler: tf_exponential_lr
+  - optimizer: adam
+  - loss: sum
+  - _self_
+
+training:
+  rec_results_freq: 500
+  max_steps: 100000
+
+optimizer:
+  lr: 8e-4
+
+scheduler:
+  decay_rate: 0.98
+  decay_steps: 40000
+
+batch_size:
+  IC: 64
+  residual_R: 512
+  residual_R2: 512
+  stoich: 512
+  data_fit: 768
+
+arch:
+  fully_connected:
+    arch_type: fully_connected
+    layer_size: 512
+    nr_layers: 6
+  linear:
+    arch_type: fully_connected
+    layer_size: 64
+    nr_layers: 2
