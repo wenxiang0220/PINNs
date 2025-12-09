@@ -119,15 +119,15 @@ def run(cfg: PhysicsNeMoConfig) -> None:
     # k1≈5.07e-3, k2≈2.10e-4, k3≈6.04e-5, k4≈7.99e-7
     # A0≈0.101, C0≈0.668, D0≈0.859, E0≈0.03035
     # Below we choose reasonably wide but focused ranges around these values.
-    K1_LO, K1_HI = Number(1e-5), Number(5e-2)    # around 5e-3
-    K2_LO, K2_HI = Number(1e-7), Number(1e-3)    # around 2e-4
-    K3_LO, K3_HI = Number(1e-7), Number(1e-3)    # around 6e-5
-    K4_LO, K4_HI = Number(1e-9), Number(1e-5)    # around 8e-7
+    K1_LO, K1_HI = Number(1e-6), Number(5e-1)    # around 5e-3
+    K2_LO, K2_HI = Number(1e-8), Number(1e-1)    # around 2e-4
+    K3_LO, K3_HI = Number(1e-7), Number(1e-1)    # around 6e-5
+    K4_LO, K4_HI = Number(1e-9), Number(1e-1)    # around 8e-7
 
     A0_LO, A0_HI = Number(1e-8), Number(1.0)     # 0.101 in range
-    C0_LO, C0_HI = Number(0.0),  Number(1.2)     # 0.668 > 0.5, widen to 1.2
-    D0_LO, D0_HI = Number(1e-8), Number(1.5)     # 0.859 > 0.3, widen to 1.5
-    E0_LO, E0_HI = Number(0.0),  Number(0.5)     # 0.03 in range
+    C0_LO, C0_HI = Number(0.0),  Number(0.0)    # 固定為 0（生成物基線）
+    D0_LO, D0_HI = Number(1e-8), Number(1.5)     # 0.859 in range
+    E0_LO, E0_HI = Number(0.0),  Number(0.0)    # 固定為 0（生成物基線）
 
     # -------- PDE (R1 + R2；R3 關閉) --------
     class Primary_Reaction_PDE(PDE):
@@ -159,9 +159,11 @@ def run(cfg: PhysicsNeMoConfig) -> None:
 
             # bounded initials
             A0 = A0_LO + (A0_HI - A0_LO) * sig(A0_raw)
-            C0 = C0_LO + (C0_HI - C0_LO) * sig(C0_raw)
+            # >>> 生成物基線固定 0
+            C0 = Number(0.0)
             D0 = D0_LO + (D0_HI - D0_LO) * sig(D0_raw)
-            E0 = E0_LO + (E0_HI - E0_LO) * sig(E0_raw)
+            # >>> 生成物基線固定 0
+            E0 = Number(0.0)
 
             # <<<--- 修改點 2: 強制 R(0)=0 和 R2(0)=0
             # bounded progress variables with hard-enforced IC
@@ -188,20 +190,19 @@ def run(cfg: PhysicsNeMoConfig) -> None:
             def pos(z): return (z + (z**2)**(Number(1)/2))/Number(2)
             order_norm = (pos(k2 - k1) + pos(k4 - k3)) / Number(1e-2)
 
-            # scaling (≈loss weights)
-            scale_R, scale_R2, scale_stoich = Number(1.0), Number(1.1), Number(0.1)
+            # weights (更直觀：數值越大→權重越重)
+            weight_R, weight_R2, weight_stoich = Number(0.35), Number(0.32), Number(0.33)
 
             # unit-consistent residuals: d()/dx - DT * RHS
-            # --- 唯一修改處：將 C = C0 + R + 9*R2 帶入 reaction_R ---
             reaction_R  = R.diff(x_var)  - DTn * (k1*(A0 - R)*H_pos              - k2*(C0 + R + Number(9)*R2))
             reaction_R2 = R2.diff(x_var) - DTn * (k3*(D0 - R2)*(H_pow)           - k4*((C0 + R + Number(9)*R2)**Number(9.0))*((E0 + Number(4)*R2)**Number(4.0)))
-            stoich = H_raw - B_meas  # use raw H to match data tightly
+            stoich = H_raw - B_meas  
 
             self.equations = {
-                "reaction_R_norm":  reaction_R  / scale_R,
-                "reaction_R2_norm": reaction_R2 / scale_R2,
-                "stoich_norm":      stoich      / scale_stoich,
-                "order_norm":       order_norm,
+                "reaction_R_weighted":  reaction_R  * weight_R,
+                "reaction_R2_weighted": reaction_R2 * weight_R2,
+                "stoich_weighted":      stoich      * weight_stoich,
+                "order_norm":           order_norm,
                 "R":  R,
                 "R2": R2,
             }
@@ -271,7 +272,7 @@ def run(cfg: PhysicsNeMoConfig) -> None:
         PointwiseConstraint.from_numpy(
             nodes=nodes,
             invar={"x": x_aug, "c1": np.ones_like(x_aug), "c2": np.ones_like(x_aug), "cA": np.ones_like(x_aug)},
-            outvar={"reaction_R_norm": zeros},
+            outvar={"reaction_R_weighted": zeros},
             batch_size=getattr(cfg.batch_size, "residual_R", x_aug.shape[0]),
         ),
         "residual_R",
@@ -281,7 +282,7 @@ def run(cfg: PhysicsNeMoConfig) -> None:
         PointwiseConstraint.from_numpy(
             nodes=nodes,
             invar={"x": x_aug, "c1": np.ones_like(x_aug), "c2": np.ones_like(x_aug), "cA": np.ones_like(x_aug)},
-            outvar={"reaction_R2_norm": zeros, "order_norm": zeros},
+            outvar={"reaction_R2_weighted": zeros, "order_norm": zeros},
             batch_size=getattr(cfg.batch_size, "residual_R2", x_aug.shape[0]),
         ),
         "residual_R2",
@@ -291,7 +292,7 @@ def run(cfg: PhysicsNeMoConfig) -> None:
         PointwiseConstraint.from_numpy(
             nodes=nodes,
             invar={"x": x_aug, "B_meas": B_aug, "c1": np.ones_like(x_aug), "c2": np.ones_like(x_aug), "cA": np.ones_like(x_aug)},
-            outvar={"stoich_norm": zeros},
+            outvar={"stoich_weighted": zeros},
             batch_size=getattr(cfg.batch_size, "stoich", x_aug.shape[0]),
         ),
         "stoich",
@@ -328,13 +329,14 @@ def run(cfg: PhysicsNeMoConfig) -> None:
         with torch.no_grad():
             raw = mph(torch.tensor([[1.0]], dtype=torch.float32, device=module_device(mph))).cpu().numpy().ravel()
         A0 = float(A0_LO) + (float(A0_HI) - float(A0_LO))*sigmoid_np(raw[0])
-        C0 = float(C0_LO) + (float(C0_HI) - float(C0_LO))*sigmoid_np(raw[1])
+        # 與 PDE 一致：C0 固定為 0
+        C0 = 0.0
         D0 = float(D0_LO) + (float(D0_HI) - float(D0_LO))*sigmoid_np(raw[2])
-        E0 = float(E0_LO) + (float(E0_HI) - float(E0_LO))*sigmoid_np(raw[3])
+        # 與 PDE 一致：E0 固定為 0
+        E0 = 0.0
         p(f"[POST] A0={A0:.6e}, C0={C0:.6e}, D0={D0:.6e}, E0={E0:.6e}")
 
         # ---- NN 前傳（R,R2,H）----
-        # <<<--- 修改點 4: 此處的 NN 前傳計算也要同步修改，乘上 x
         mfc = get_core_module(find_torch_module(FC)); mfc.eval()
         with torch.no_grad():
             out = mfc(torch.tensor(x[:,None], dtype=torch.float32, device=module_device(mfc))).cpu().numpy()
