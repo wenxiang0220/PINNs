@@ -47,3 +47,21 @@
 ```bash
 python -c "import physicsnemo.sym; print('OK')"
 
+flowchart LR
+  CSV[(CSV: P(t),T(t))] --> PRE[Preprocess<br/>slice 4574-8166s<br/>P,T → B_meas]
+  PRE --> X[x = (t-t0)/DT]
+  PRE --> B[B_meas(x), B_init]
+
+  X --> FC[FC MLP<br/>6×512] --> RAW[raw_R(x), raw_R2(x)]
+  RAW --> MAP1[Hard IC + Sigmoid Bounds] --> RR[R(x), R2(x)]
+
+  c1((1)) --> RC1[Const head (MLP 2×64)] --> K12[k1,k2]
+  c2((1)) --> RC2[Const head (MLP 2×64)] --> K34[k3,k4]
+  cA((1)) --> PH[Const head (MLP 2×64)] --> P0[A0_raw,D0_raw,...]
+
+  RR --> PDE[ODE residuals<br/>d/dx - DT·RHS] --> LOSS
+  B --> STO[Stoich/data-fit<br/>H_raw - B_meas] --> LOSS
+  K12 --> PDE
+  K34 --> PDE
+  P0 --> PDE
+  LOSS --> OPT[PhysicsNeMo Solver]
